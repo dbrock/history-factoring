@@ -61,4 +61,11 @@
                   (?M (concat "[PATCH] " file-name "\n"))
                   (t "")))))))
 
+(define-key magit-status-mode-map (kbd "C") 'history-factoring-auto-commit)
+
+(defun history-factoring-auto-commit ()
+  (interactive)
+  (magit-log-edit)
+  (magit-log-edit-commit))
+
 (provide 'history-factoring)
