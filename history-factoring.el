@@ -1,3 +1,4 @@
+(require 'magit)
 (require 'rebase-mode)
 
 (defun x-shell-quote (string)
@@ -21,13 +22,43 @@
 
 (define-key rebase-mode-map (kbd "d") 'x-rebase-mode-reexec)
 
-(defvar x-magit-commit-shell-command-history nil)
-
-(defun x-magit-commit-shell-command (command)
+(defun x-magit-commit-shell-command (command &optional force)
   "Run `git do COMMAND' using `magit-git-command'."
   (interactive
-   (list (read-string "Git commit shell command: " nil
-                      'x-magit-commit-shell-command-history)))
-  (magit-git-command (concat "do " (x-shell-quote command))))
+   (list (read-shell-command (if current-prefix-arg
+                                 "Execute and commit (allow dirty): "
+                               "Execute and commit: "))
+         current-prefix-arg))
+  (if force
+      (magit-run-git "do" "-f" command)
+    (magit-run-git "do" command))
+  (when (eq major-mode 'dired-mode)
+    (revert-buffer)))
 
 (global-set-key (kbd "C-c !") 'x-magit-commit-shell-command)
+(define-key dired-mode-map (kbd "c") 'x-magit-commit-shell-command)
+
+;; Bind `! d' to `x-magit-commit-shell-command' in Magit.
+(let* ((running-group (cdr (assoc 'running magit-key-mode-groups)))
+       (actions-group (assoc 'actions running-group))
+       (actions (cdr actions-group)))
+  (setcdr actions-group
+          (append actions '(("c" "Execute and commit"
+                             x-magit-commit-shell-command))))
+  ;; Force rebuilding of keymaps:
+  (setq magit-key-mode-key-maps nil))
+
+(add-hook 'magit-log-edit-mode-hook 'history-factoring-guess-log-message)
+
+(defun history-factoring-guess-log-message ()
+  (let ((status (magit-git-string
+                 "diff-index" "--name-status" "--cached" "HEAD")))
+    (when (and status (string-match "\\`\\([ADM]\\)\t\\(.+\\)\\'" status))
+      (let ((file-name (match-string 2 status)))
+        (insert (case (string-to-char (match-string 1 status))
+                  (?A (concat "[FILE] " file-name "\n"))
+                  (?D (concat "$ rm " file-name "\n"))
+                  (?M (concat "[PATCH] " file-name "\n"))
+                  (t "")))))))
+
+(provide 'history-factoring)
