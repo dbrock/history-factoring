@@ -7,7 +7,7 @@
 ;; =================
 ;; * [rebase-mode] Internal utility functions
 ;; * [rebase-mode] Keep empty commits
-;; * [rebase-mode] Create empty commit
+;; * [rebase-mode] Add message in empty commit
 ;; * [rebase-mode] Re-execute command
 ;; * [rebase-mode] Clean up command list
 ;; * [magit-status] Execute command and commit results
@@ -36,14 +36,19 @@
 (defun rebase-mode--add-command (command description)
   (rebase-mode--edit-command-list
     (insert (concat "#  " command " = " description "\n")))
-  (rebase-mode--sort-command-list))
+  (rebase-mode--reformat-command-list))
 
-(defun rebase-mode--sort-command-list ()
+(defun rebase-mode--reformat-command-list ()
   (rebase-mode--edit-command-list
-    (let ((beginning (point)))
-      (re-search-forward "^#\n")
-      (forward-line -1)
-      (sort-lines nil beginning (point)))))
+    (let ((beginning (point))
+          (end (progn (re-search-forward "^#\n")
+                      (forward-line -1)
+                      (point))))
+      (sort-lines nil beginning end)
+      (align-regexp beginning end "\\(\\s-*\\)="))))
+
+(defun rebase-mode--shell-quote (string)
+  (concat "'" (replace-regexp-in-string "'" "'\"'\"'" string) "'"))
 
 
 ;;; [rebase-mode] Keep empty commits
@@ -71,36 +76,24 @@
         (replace-regexp "^# pick " "  pick ")))))
 
 
-;;; [rebase-mode] Create empty commit
+;;; [rebase-mode] Add message in empty commit
 
 (define-key rebase-mode-map (kbd "m") 'rebase-mode-message)
 
-(defvar magit-read-message-history nil
-  "The history of inputs to `magit-read-message'.")
+(defvar rebase-mode-message-history nil
+  "The history of inputs to `rebase-mode-message'.")
 
 (defun rebase-mode-message ()
   "Insert a todo list command that creates an empty commit."
   (interactive)
   (let ((inhibit-read-only t)
-        (line (magit-read-)))
+        (line (read-string "Message: " nil 'rebase-mode-message-history)))
       (unless (equal "" line)
         (move-end-of-line nil)
         (newline)
-        (insert (concat "exec " line))))
-    (move-beginning-of-line nil)
-  (when (rebase-mode-looking-at-action)
-    (let* ((command (match-string 3))
-           (command (if (string-match "^\\$ \\(.+\\)" command)
-                        (let ((quoted-command
-                               (rebase-mode-reexec--shell-quote
-                                (match-string 1 command))))
-                          (concat "git do " quoted-command))
-                      command))
-           (command (rebase-mode-read-exec-line command))
-           (inhibit-read-only t))
-      (rebase-mode-kill-line)
-      (open-line 1)
-      (insert (concat "exec " command)))))
+        (insert (concat "exec git commit --allow-empty -m "
+                        (rebase-mode--shell-quote line)))))
+    (move-beginning-of-line nil))
   
 (add-hook 'rebase-mode-hook 'rebase-mode-message--init)
 
@@ -120,7 +113,7 @@
     (let* ((command (match-string 3))
            (command (if (string-match "^\\$ \\(.+\\)" command)
                         (let ((quoted-command
-                               (rebase-mode-reexec--shell-quote
+                               (rebase-mode--shell-quote
                                 (match-string 1 command))))
                           (concat "git do " quoted-command))
                       command))
@@ -130,9 +123,6 @@
       (open-line 1)
       (insert (concat "exec " command)))))
 
-(defun rebase-mode-reexec--shell-quote (string)
-  (concat "'" (replace-regexp-in-string "'" "'\"'\"'" string) "'"))
-  
 (add-hook 'rebase-mode-hook 'rebase-mode-reexec--init)
 
 (defun rebase-mode-reexec--init ()
