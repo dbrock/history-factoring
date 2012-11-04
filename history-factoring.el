@@ -5,13 +5,14 @@
 
 ;; Table of contents
 ;; =================
-;; * Keep empty commits on rebase
-;; * Execute command and commit results
-;; * Re-execute command during rebase
-;; * Guess log message
-;; * Commit with default message
-;; * Clean up command list in interactive rebase
-;; * Internal utility functions
+;; * [rebase-mode] Internal utility functions
+;; * [rebase-mode] Keep empty commits
+;; * [rebase-mode] Create empty commit
+;; * [rebase-mode] Re-execute command
+;; * [rebase-mode] Clean up command list
+;; * [magit-status] Execute command and commit results
+;; * [magit-status] Commit with default message
+;; * [magit-log-edit] Guess log message
 
 ;;; Code:
 
@@ -21,7 +22,31 @@
 (define-key rebase-mode-map (kbd "q") 'rebase-mode-abort)
 
 
-;;; Keep empty commits on rebase
+;;; [rebase-mode] Internal utility functions
+
+(defmacro rebase-mode--edit-command-list (&rest body)
+  (declare (indent 0))
+  `(save-excursion 
+     (goto-char (point-min))
+     (re-search-forward "^# Commands:")
+     (forward-line)
+     (let ((inhibit-read-only t))
+       ,@body)))
+
+(defun rebase-mode--add-command (command description)
+  (rebase-mode--edit-command-list
+    (insert (concat "#  " command " = " description "\n")))
+  (rebase-mode--sort-command-list))
+
+(defun rebase-mode--sort-command-list ()
+  (rebase-mode--edit-command-list
+    (let ((beginning (point)))
+      (re-search-forward "^#\n")
+      (forward-line -1)
+      (sort-lines nil beginning (point)))))
+
+
+;;; [rebase-mode] Keep empty commits
 
 (defcustom rebase-mode-keep-empty nil
   "Whether to keep empty commits when rebasing.")
@@ -39,13 +64,100 @@
     (goto-char (point-min))
     (when (re-search-forward "\
 ^# Note that empty commits are commented out" nil 'noerror)
-      (replace-match "\
+      (let ((inhibit-read-only t))
+        (replace-match "\
 # Your empty commits will be kept; they were indented to stand out more.")
-      (goto-char (point-min))
-      (replace-regexp "^# pick " "  pick "))))
+        (goto-char (point-min))
+        (replace-regexp "^# pick " "  pick ")))))
 
 
-;;; Execute command and commit results
+;;; [rebase-mode] Create empty commit
+
+(define-key rebase-mode-map (kbd "m") 'rebase-mode-message)
+
+(defvar magit-read-message-history nil
+  "The history of inputs to `magit-read-message'.")
+
+(defun rebase-mode-message ()
+  "Insert a todo list command that creates an empty commit."
+  (interactive)
+  (let ((inhibit-read-only t)
+        (line (magit-read-)))
+      (unless (equal "" line)
+        (move-end-of-line nil)
+        (newline)
+        (insert (concat "exec " line))))
+    (move-beginning-of-line nil)
+  (when (rebase-mode-looking-at-action)
+    (let* ((command (match-string 3))
+           (command (if (string-match "^\\$ \\(.+\\)" command)
+                        (let ((quoted-command
+                               (rebase-mode-reexec--shell-quote
+                                (match-string 1 command))))
+                          (concat "git do " quoted-command))
+                      command))
+           (command (rebase-mode-read-exec-line command))
+           (inhibit-read-only t))
+      (rebase-mode-kill-line)
+      (open-line 1)
+      (insert (concat "exec " command)))))
+  
+(add-hook 'rebase-mode-hook 'rebase-mode-message--init)
+
+(defun rebase-mode-message--init ()
+  (rebase-mode--add-command
+   "m" "add a message in an empty commit"))
+
+
+;;; [rebase-mode] Re-execute command
+
+(define-key rebase-mode-map (kbd "y") 'rebase-mode-reexec)
+
+(defun rebase-mode-reexec ()
+  "Re-execute a commit message that starts with `$'."
+  (interactive)
+  (when (rebase-mode-looking-at-action)
+    (let* ((command (match-string 3))
+           (command (if (string-match "^\\$ \\(.+\\)" command)
+                        (let ((quoted-command
+                               (rebase-mode-reexec--shell-quote
+                                (match-string 1 command))))
+                          (concat "git do " quoted-command))
+                      command))
+           (command (rebase-mode-read-exec-line command))
+           (inhibit-read-only t))
+      (rebase-mode-kill-line)
+      (open-line 1)
+      (insert (concat "exec " command)))))
+
+(defun rebase-mode-reexec--shell-quote (string)
+  (concat "'" (replace-regexp-in-string "'" "'\"'\"'" string) "'"))
+  
+(add-hook 'rebase-mode-hook 'rebase-mode-reexec--init)
+
+(defun rebase-mode-reexec--init ()
+  (rebase-mode--add-command
+   "y" "re-execute command (for `$'-prefixed commit messages)"))
+
+
+;;; [rebase-mode] Clean up command list
+
+(add-hook 'rebase-mode-hook 'rebase-mode--clean-command-list)
+
+(defun rebase-mode--clean-command-list ()
+  ;; Remove extraneous information.
+  (rebase-mode--edit-command-list
+    (when (re-search-forward "\
+# However, if you remove everything, the rebase will be aborted." nil t)
+      (replace-match "")))  
+  ;; Remove extraneous blank lines.
+  (rebase-mode--edit-command-list
+    (re-search-forward "^#\n")
+    (while (re-search-forward "^#?\n" nil t)
+      (replace-match ""))))
+
+
+;;; [magit-status] Execute command and commit results
 
 ;; Bind `! d' to `magit-execute-and-commit' in Magit.
 (let* ((running-group (cdr (assoc 'running magit-key-mode-groups)))
@@ -74,35 +186,17 @@
     (revert-buffer)))
 
 
-;;; Re-execute command during rebase
+;;; [magit-status] Commit with default message
 
-(add-hook 'rebase-mode-hook 'rebase-mode-reexec--init)
-(define-key rebase-mode-map (kbd "E") 'rebase-mode-reexec)
+(define-key magit-status-mode-map (kbd "C")
+  'magit-commit-with-default-message)
 
-(defun rebase-mode-reexec--init ()
-  (rebase-mode--add-command
-   "E" "re-execute command in `$'-prefixed commit message"))
+(defun magit-commit-with-default-message (arg)
+  "Attempt to commit automatically."
+  (interactive "P")
+  (magit-log-edit arg)
+  (magit-log-edit-commit))
 
-(defun rebase-mode-reexec ()
-  "Re-execute a commit message that starts with `$'."
-  (interactive)
-  (when (rebase-mode-looking-at-action)
-    (let* ((command (match-string 3))
-           (command (if (string-match "^\\$ \\(.+\\)" command)
-                        (let ((quoted-command
-                               (rebase-mode-reexec--shell-quote
-                                (match-string 1 command))))
-                          (concat "git do " quoted-command))
-                      command))
-           (command (rebase-mode-read-exec-line command))
-           (inhibit-read-only t))
-      (rebase-mode-kill-line)
-      (open-line 1)
-      (insert (concat "exec " command)))))
-
-(defun rebase-mode-reexec--shell-quote (string)
-  (concat "'" (replace-regexp-in-string "'" "'\"'\"'" string) "'"))
-  
 
 ;;; Guess log message
 
@@ -126,58 +220,6 @@
                   (?M (concat "[PATCH] " file-name "\n"))
                   (t "")))))))
 
-
-;;; Commit with default message
-
-(define-key magit-status-mode-map (kbd "C")
-  'magit-commit-with-default-message)
-
-(defun magit-commit-with-default-message (arg)
-  "Attempt to commit automatically."
-  (interactive "P")
-  (magit-log-edit arg)
-  (magit-log-edit-commit))
-
-
-;;; Clean up command list in interactive rebase
-
-(add-hook 'rebase-mode-hook 'rebase-mode--clean-command-list)
-
-(defun rebase-mode--clean-command-list ()
-  ;; Remove extraneous blank lines.
-  (rebase-mode--with-command-list
-    (re-search-forward "^#\n")
-    (while (re-search-forward "^#?\n" nil t)
-      (replace-match "")))
-  ;; Remove extraneous information.
-  (save-excursion
-    (goto-char (point-min))
-    (when (re-search-forward "\
-# However, if you remove everything, the rebase will be aborted." nil t)
-      (replace-match ""))))
-
-
-;;; Internal utility functions
-
-(defun rebase-mode--add-command (command description)
-  (rebase-mode--with-command-list
-    (insert (concat "#  " command " = " description "\n")))
-  (rebase-mode--sort-command-list))
-
-(defun rebase-mode--sort-command-list ()
-  (rebase-mode--with-command-list
-    (let ((beginning (point)))
-      (re-search-forward "^#\n")
-      (forward-line -1)
-      (sort-lines nil beginning (point)))))
-
-(defmacro rebase-mode--with-command-list (&body body)
-  (declare (indent 0))
-  `(save-excursion
-     (goto-char (point-min))
-     (re-search-forward "^# Commands:")
-     (forward-line)
-     ,@body))
 
 
 (provide 'history-factoring)
