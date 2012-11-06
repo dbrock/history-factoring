@@ -5,14 +5,13 @@
 
 ;; Table of contents
 ;; =================
+;; * [git-save] Commit changes with stardard message
+;; * [git-save] Execute command and commit results
 ;; * [rebase-mode] Internal utility functions
 ;; * [rebase-mode] Keep empty commits
 ;; * [rebase-mode] Add message in empty commit
 ;; * [rebase-mode] Re-execute command
 ;; * [rebase-mode] Clean up command list
-;; * [magit-status] Execute command and commit results
-;; * [magit-status] Commit with default message
-;; * [magit-log-edit] Guess log message
 
 ;;; Code:
 
@@ -20,6 +19,45 @@
 (require 'rebase-mode)
 
 (define-key rebase-mode-map (kbd "q") 'rebase-mode-abort)
+
+
+;;; [git-save] Commit changes with standard message
+
+(define-key magit-status-mode-map (kbd "C") 'magit-save-changes)
+
+(defun magit-save-changes (&optional also-untracked-p)
+  "Commit all changes with a standard message using `git save'.
+With prefix argument, pass `-a' flag to also add untracked files."
+  (interactive "P")
+  (magit-run-git "save" (if also-untracked-p "-a" "-u")))
+
+
+;;; [git-save] Execute command and commit results
+
+;; Bind `! d' to `magit-execute-and-commit' in Magit.
+(let* ((running-group (cdr (assoc 'running magit-key-mode-groups)))
+       (actions-group (assoc 'actions running-group))
+       (actions (cdr actions-group)))
+  (setcdr actions-group
+          (append actions '(("c" "Execute and commit"
+                             my-magit-commit-shell-command))))
+  ;; Force rebuilding of keymaps:
+  (setq magit-key-mode-key-maps nil))
+
+(eval-after-load 'dired
+  '(define-key dired-mode-map (kbd "c") 'magit-execute-and-commit))
+
+(defun magit-execute-and-commit (command &optional also-untracked-p)
+  "Commit the results of a command using `git save [-a] -c COMMAND'.
+With prefix argument, pass `-a' flag to also add untracked files."
+  (interactive
+   (list (read-shell-command (if current-prefix-arg
+                                 "Execute and commit (also untracked): "
+                               "Execute and commit: "))
+         current-prefix-arg))
+  (magit-run-git "save" (if also-untracked-p "-a" "-u") "-c" command)
+  (when (eq major-mode 'dired-mode)
+    (revert-buffer)))
 
 
 ;;; [rebase-mode] Internal utility functions
@@ -71,9 +109,9 @@
 ^# Note that empty commits are commented out" nil 'noerror)
       (let ((inhibit-read-only t))
         (replace-match "\
-# Your empty commits will be kept; they were indented to stand out more.")
+# Your empty commits will be kept.")
         (goto-char (point-min))
-        (replace-regexp "^# pick " "  pick ")))))
+        (replace-regexp "^# pick " "pick ")))))
 
 
 ;;; [rebase-mode] Add message in empty commit
@@ -145,71 +183,6 @@
     (re-search-forward "^#\n")
     (while (re-search-forward "^#?\n" nil t)
       (replace-match ""))))
-
-
-;;; [magit-status] Execute command and commit results
-
-;; Bind `! d' to `magit-execute-and-commit' in Magit.
-(let* ((running-group (cdr (assoc 'running magit-key-mode-groups)))
-       (actions-group (assoc 'actions running-group))
-       (actions (cdr actions-group)))
-  (setcdr actions-group
-          (append actions '(("c" "Execute and commit"
-                             my-magit-commit-shell-command))))
-  ;; Force rebuilding of keymaps:
-  (setq magit-key-mode-key-maps nil))
-
-(eval-after-load 'dired
-  '(define-key dired-mode-map (kbd "c") 'magit-execute-and-commit))
-
-(defun magit-execute-and-commit (command &optional force)
-  "Run `git do [-f] COMMAND' using `magit-git-command'."
-  (interactive
-   (list (read-shell-command (if current-prefix-arg
-                                 "Execute and commit (allow dirty): "
-                               "Execute and commit: "))
-         current-prefix-arg))
-  (if force
-      (magit-run-git "do" "-f" command)
-    (magit-run-git "do" command))
-  (when (eq major-mode 'dired-mode)
-    (revert-buffer)))
-
-
-;;; [magit-status] Commit with default message
-
-(define-key magit-status-mode-map (kbd "C")
-  'magit-commit-with-default-message)
-
-(defun magit-commit-with-default-message (arg)
-  "Attempt to commit automatically."
-  (interactive "P")
-  (magit-log-edit arg)
-  (magit-log-edit-commit))
-
-
-;;; Guess log message
-
-(defcustom magit-guess-log-message nil
-  "Whether to guess what log message to use.")
-
-(add-hook 'magit-log-edit-mode-hook 'magit-maybe-guess-log-message)
-
-(defun magit-maybe-guess-log-message ()
-  (when magit-guess-log-message
-    (magit-guess-log-message)))
-
-(defun magit-guess-log-message ()
-  (let ((status (magit-git-string
-                 "diff-index" "--name-status" "--cached" "HEAD")))
-    (when (and status (string-match "\\`\\([ADM]\\)\t\\(.+\\)\\'" status))
-      (let ((file-name (match-string 2 status)))
-        (insert (case (string-to-char (match-string 1 status))
-                  (?A (concat "[FILE] " file-name "\n"))
-                  (?D (concat "$ rm " file-name "\n"))
-                  (?M (concat "[PATCH] " file-name "\n"))
-                  (t "")))))))
-
 
 
 (provide 'history-factoring)
