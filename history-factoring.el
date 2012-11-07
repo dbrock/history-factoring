@@ -153,7 +153,7 @@ With prefix argument, pass `-a' flag to also add untracked files."
                         (let ((quoted-command
                                (rebase-mode--shell-quote
                                 (match-string 1 command))))
-                          (concat "git do " quoted-command))
+                          (concat "git save -a -c " quoted-command))
                       command))
            (command (rebase-mode-read-exec-line command))
            (inhibit-read-only t))
