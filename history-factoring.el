@@ -29,7 +29,9 @@
   "Commit all changes with a standard message using `git save'.
 With prefix argument, pass `-a' flag to also add untracked files."
   (interactive "P")
-  (magit-run-git "save" (if also-untracked-p "-a" "-u")))
+  (if also-untracked-p
+      (magit-run-git "save" "-a")
+    (magit-run-git "save")))
 
 
 ;;; [git-save] Execute command and commit results
@@ -55,7 +57,9 @@ With prefix argument, pass `-a' flag to also add untracked files."
                                  "Execute and commit (also untracked): "
                                "Execute and commit: "))
          current-prefix-arg))
-  (magit-run-git "save" (if also-untracked-p "-a" "-u") "-c" command)
+  (if also-untracked-p
+      (magit-run-git "save" "-a" "-c" command)
+    (magit-run-git "save" "-c" command))
   (when (eq major-mode 'dired-mode)
     (revert-buffer)))
 
