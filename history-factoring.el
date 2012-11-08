@@ -18,8 +18,6 @@
 (require 'magit)
 (require 'rebase-mode)
 
-(define-key rebase-mode-map (kbd "q") 'rebase-mode-abort)
-
 
 ;;; [git-save] Commit changes with standard message
 
@@ -42,7 +40,7 @@ With prefix argument, pass `-a' flag to also add untracked files."
        (actions (cdr actions-group)))
   (setcdr actions-group
           (append actions '(("c" "Execute and commit"
-                             my-magit-commit-shell-command))))
+                             magit-execute-and-commit))))
   ;; Force rebuilding of keymaps:
   (setq magit-key-mode-key-maps nil))
 
@@ -118,15 +116,42 @@ With prefix argument, pass `-a' flag to also add untracked files."
         (replace-regexp "^# pick " "pick ")))))
 
 
-;;; [rebase-mode] Add message in empty commit
+;;; [rebase-mode] Key bindings
 
-(define-key rebase-mode-map (kbd "m") 'rebase-mode-message)
+(define-key rebase-mode-map (kbd "D") 'rebase-mode-redo)
+(define-key rebase-mode-map (kbd "M") 'rebase-mode-message)
+;; (define-key rebase-mode-map (kbd "Q") 'rebase-mode-quit)
+(define-key rebase-mode-map (kbd "T") 'rebase-mode-retitle)
+
+(add-hook 'rebase-mode-hook 'history-refactoring--rebase-mode-hook)
+
+(defun history-refactoring--rebase-mode-hook ()
+  (rebase-mode--add-command
+   "D" "redo command (for `$'-prefixed commit messages)")
+  (rebase-mode--add-command
+   "M" "insert an empty commit with a title message")
+  (rebase-mode--add-command
+   "T" "quickly change the title of a commit message")
+  (set-buffer-modified-p nil))
+
+;; (defun rebase-mode-quit ()
+;;   "Abort this rebase gracefully by [???]."
+;;   (interactive)
+;;   (when (or (not (buffer-modified-p))
+;;             (y-or-n-p "Abort this rebase? "))
+;;     (let ((buffer-read-only nil))
+;;       (delete-region (point-min) (point-max))
+;;       (save-buffer)
+;;       (server-edit))))
+
+
+;;; [rebase-mode] Add message in empty commit
 
 (defvar rebase-mode-message-history nil
   "The history of inputs to `rebase-mode-message'.")
 
 (defun rebase-mode-message ()
-  "Insert a todo list command that creates an empty commit."
+  "Insert a command that creates an empty commit."
   (interactive)
   (let ((inhibit-read-only t)
         (line (read-string "Message: " nil 'rebase-mode-message-history)))
@@ -137,39 +162,32 @@ With prefix argument, pass `-a' flag to also add untracked files."
                         (rebase-mode--shell-quote line)))))
     (move-beginning-of-line nil))
   
-(add-hook 'rebase-mode-hook 'rebase-mode-message--init)
+
+;;; [rebase-mode] Change title command
 
-(defun rebase-mode-message--init ()
-  (rebase-mode--add-command
-   "m" "add a message in an empty commit"))
+(defun rebase-mode-retitle ()
+  "Quickly change the title of a commit message."
+  (interactive))
 
 
-;;; [rebase-mode] Re-execute command
+;;; [rebase-mode] Redo command
 
-(define-key rebase-mode-map (kbd "y") 'rebase-mode-reexec)
-
-(defun rebase-mode-reexec ()
-  "Re-execute a commit message that starts with `$'."
+(defun rebase-mode-redo ()
+  "Redo the command in a commit title that starts with `$'."
   (interactive)
   (when (rebase-mode-looking-at-action)
     (let* ((command (match-string 3))
-           (command (if (string-match "^\\$ \\(.+\\)" command)
+           (command (if (string-match "^.?\\$ \\(.+\\)" command)
                         (let ((quoted-command
                                (rebase-mode--shell-quote
                                 (match-string 1 command))))
-                          (concat "git save -a -c " quoted-command))
+                          (concat "git save -A -c " quoted-command))
                       command))
            (command (rebase-mode-read-exec-line command))
            (inhibit-read-only t))
       (rebase-mode-kill-line)
       (open-line 1)
       (insert (concat "exec " command)))))
-
-(add-hook 'rebase-mode-hook 'rebase-mode-reexec--init)
-
-(defun rebase-mode-reexec--init ()
-  (rebase-mode--add-command
-   "y" "re-execute command (for `$'-prefixed commit messages)"))
 
 
 ;;; [rebase-mode] Clean up command list
