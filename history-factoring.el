@@ -127,11 +127,11 @@ With prefix argument, pass `-a' flag to also add untracked files."
 
 (defun history-refactoring--rebase-mode-hook ()
   (rebase-mode--add-command
-   "D" "redo command (for `$'-prefixed commit messages)")
+   "D, redo" "redo command (for `$'-prefixed commit messages)")
   (rebase-mode--add-command
-   "M" "insert an empty commit with a title message")
+   "M, message" "insert an empty commit with a title message")
   (rebase-mode--add-command
-   "T" "quickly change the title of a commit message")
+   "T, retitle" "quickly change the title of a commit message")
   (set-buffer-modified-p nil))
 
 ;; (defun rebase-mode-quit ()
